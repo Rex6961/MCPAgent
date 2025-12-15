@@ -7,13 +7,14 @@ This project demonstrates an advanced architectural pattern using the **Model Co
 
 To understand MCP, we use the **"Universal USB Driver" Analogy**:
 
-* **MCP Server (The Flash Drive):** A standalone process containing specific capabilities (Tools: `add_numbers`, `get_echo`) and resources. It knows nothing about the AI.
-* **MCP Client/Agent (The Computer):** Connects to the server via a standard port (Stdio), "reads" the available tools, and dynamically adds them to its toolset.
-* **Transport (The USB Cable):** The communication layer. In this project, we use standard input/output (`Stdio`) pipes to send JSON-RPC messages.
+- **MCP Server (The Flash Drive):** A standalone process containing specific capabilities (Tools: `add_numbers`, `get_echo`) and resources. It knows nothing about the AI.
+- **MCP Client/Agent (The Computer):** Connects to the server via a standard port (Stdio), "reads" the available tools, and dynamically adds them to its toolset.
+- **Transport (The USB Cable):** The communication layer. In this project, we use standard input/output (`Stdio`) pipes to send JSON-RPC messages.
 
 ### Architecture Diagram
 
 The Agent spawns the Server as a subprocess and communicates via JSON-RPC protocol.
+````
 
 ```mermaid
 sequenceDiagram
@@ -32,7 +33,7 @@ sequenceDiagram
     Transport->>Server: Execute Logic (a + b)
     Server-->>Transport: JSON-RPC Response (Result)
     Transport-->>Agent: Tool Output
-````
+```
 
 ## 📂 Project Structure
 
@@ -133,6 +134,6 @@ agent = LlmAgent(
 
 ## 🏆 Key Takeaways
 
-  * **Decoupling:** You can change the server code (or even rewrite it in TypeScript) without changing a single line of the Agent's code.
-  * **Security:** The Agent runs in its own process; the Tools run in another.
-  * **Scalability:** You can connect multiple MCP servers (Filesystem, Database, Math) to a single Agent seamlessly.
+- **Decoupling:** You can change the server code (or even rewrite it in TypeScript) without changing a single line of the Agent's code.
+- **Security:** The Agent runs in its own process; the Tools run in another.
+- **Scalability:** You can connect multiple MCP servers (Filesystem, Database, Math) to a single Agent seamlessly.
