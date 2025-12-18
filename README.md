@@ -1,4 +1,4 @@
-````markdown
+```markdown
 # Model Context Protocol (MCP) Integration
 
 This project demonstrates an advanced architectural pattern using the **Model Context Protocol (MCP)** within the Google ADK framework. Unlike standard Function Calling (where logic is embedded in the agent's code), this project decouples the **Tool Logic (Server)** from the **Agent Logic (Client)**.
@@ -7,37 +7,44 @@ This project demonstrates an advanced architectural pattern using the **Model Co
 
 To understand MCP, we use the **"Universal USB Driver" Analogy**:
 
-- **MCP Server (The Flash Drive):** A standalone process containing specific capabilities (Tools: `add_numbers`, `get_echo`) and resources. It knows nothing about the AI.
-- **MCP Client/Agent (The Computer):** Connects to the server via a standard port (Stdio), "reads" the available tools, and dynamically adds them to its toolset.
+- **MCP Servers (The Flash Drives):** Standalone processes containing specific capabilities. We have two:
+    1.  **Math Server:** Logic for calculations (`add_numbers`).
+    2.  **Filesystem Server:** Logic for accessing local files (`list_files`).
+- **MCP Client/Agent (The Computer):** Connects to the servers via standard ports (Stdio), "reads" the available tools, and dynamically adds them to its toolset.
 - **Transport (The USB Cable):** The communication layer. In this project, we use standard input/output (`Stdio`) pipes to send JSON-RPC messages.
 
 ### Architecture Diagram
 
-The Agent spawns the Server as a subprocess and communicates via JSON-RPC protocol.
-````
+The Agent spawns multiple Servers as subprocesses and communicates via JSON-RPC protocol simultaneously.
+```
 
 ```mermaid
 sequenceDiagram
     participant Agent as ADK Agent (Client)
-    participant Transport as Stdio Pipe
-    participant Server as MCP Server (Python Process)
+    participant Transport as Stdio Pipes
+    participant Server1 as Math MCP Server
+    participant Server2 as Filesystem MCP Server
 
-    Note over Agent, Server: Initialization Phase
-    Agent->>Transport: Spawn Process (python simple_mcp.py)
-    Agent->>Server: Handshake (Initialize)
-    Server-->>Agent: List Tools [add_numbers, get_echo, get_time]
+    Note over Agent, Server2: Initialization Phase
+    Agent->>Transport: Spawn Process 1 (simple_mcp.py)
+    Agent->>Transport: Spawn Process 2 (filesystem_server.py)
+    Server1-->>Agent: List Tools [add_numbers, get_time...]
+    Server2-->>Agent: List Tools [list_files]
 
-    Note over Agent, Server: Execution Phase
-    Agent->>Agent: LLM Selects "add_numbers"
-    Agent->>Transport: JSON-RPC Request
-    Transport->>Server: Execute Logic (a + b)
-    Server-->>Transport: JSON-RPC Response (Result)
-    Transport-->>Agent: Tool Output
+    Note over Agent, Server2: Execution Phase
+    Agent->>Agent: LLM needs to calculate
+    Agent->>Server1: JSON-RPC (add_numbers)
+    Server1-->>Agent: Result (155)
+
+    Agent->>Agent: LLM needs file list
+    Agent->>Server2: JSON-RPC (list_files)
+    Server2-->>Agent: Result (['file1.txt', 'src'...])
+
 ```
 
 ## 📂 Project Structure
 
-The project follows a modular structure separating the server implementation from the agent consumer.
+The project follows a modular structure separating the server implementations from the agent consumer.
 
 ```text
 .
@@ -48,92 +55,114 @@ The project follows a modular structure separating the server implementation fro
 │       ├── agent.py                # CLIENT: The ADK Agent that consumes tools
 │       ├── config.py               # CONFIG: Pydantic settings
 │       └── servers
-│           └── simple_mcp.py       # SERVER: Standalone FastMCP implementation
+│           ├── simple_mcp.py       # SERVER 1: Math & Time utilities
+│           └── filesystem_server.py# SERVER 2: Filesystem operations
 └── tests                           # Unit Tests
+
 ```
 
 ## ⚙️ Setup & Installation
 
-1.  **Prerequisites**: Python 3.13+, Poetry installed.
-2.  **Environment**:
-    Use the `Makefile` to install dependencies (including the `mcp` SDK):
-    ```bash
-    make install
-    ```
-3.  **Configuration**:
-    Create a `.env` file in the root directory. This project requires a Google API Key.
-    ```ini
-    GOOGLE__API_KEY=your_actual_api_key
-    GOOGLE__GENAI_USE_VERTEXAI=false
-    ```
+1. **Prerequisites**: Python 3.13+, Poetry installed.
+2. **Environment**:
+Use the `Makefile` to install dependencies (including the `mcp` SDK):
+```bash
+make install
+
+```
+
+
+3. **Configuration**:
+Create a `.env` file in the root directory. This project requires a Google API Key.
+```ini
+GOOGLE__API_KEY=your_actual_api_key
+GOOGLE__GENAI_USE_VERTEXAI=false
+
+```
+
+
 
 ## 🚀 Usage
 
-This command starts the Agent, which automatically launches the MCP Server in the background.
+This command starts the Agent, which automatically launches both MCP Servers in the background.
 
 ```bash
 make run
+
 ```
 
 ### Expected Output
 
-Observe the system logs. You will see the Agent connecting, discovering tools, and executing them via the protocol.
+Observe the system logs. You will see the Agent connecting, discovering tools from multiple sources, and executing them.
 
 ```text
-USER: Calculate 100 + 55 using the tools, and give the current time, and then echo the result.
+USER: Calculate 100 + 55 using the tools, and give the current time, and give files to the path '../', and then echo the result.
 AGENT:
 [SYSTEM: Calling MCP Tool 'add_numbers']
 [SYSTEM: Calling MCP Tool 'get_current_time']
+[SYSTEM: Calling MCP Tool 'list_files']
 [SYSTEM: Calling MCP Tool 'get_echo']
-Echo from MCP: 155 (Time: 15/12/2025 10:00)
+Echo from MCP: 155, Time: 15/12/2025 10:00, Files: ['Makefile', 'pyproject.toml', 'src'...]
 [SYSTEM: Closing MCP connection...]
+
 ```
 
 ## 💻 Code Highlights
 
-### 1\. The MCP Server (`simple_mcp.py`)
+### 1. The Math Server (`simple_mcp.py`)
 
-We use `FastMCP` to quickly expose Python functions as standardized tools. Notice this file has **no dependency** on Google ADK or LLMs. It is pure logic.
+Provides basic calculation logic.
+
+```python
+@mcp.tool()
+def add_numbers(a: int, b: int) -> int:
+    return a + b
+
+```
+
+### 2. The Filesystem Server (`filesystem_server.py`)
+
+Provides access to the OS layer. Notice this is a completely separate file/process.
 
 ```python
 from mcp.server.fastmcp import FastMCP
+import os
 
-mcp = FastMCP("TimeAndMathServer")
+mcp = FastMCP("FileSystemServer")
 
 @mcp.tool()
-def add_numbers(a: int, b: int) -> int:
-    """Add two numbers."""
-    return a + b
+def list_files(directory: str) -> dict:
+    """Echoes directories files."""
+    return {"files": str(os.listdir(directory))}
 
-if __name__ == "__main__":
-    mcp.run() # Listens on Stdio
 ```
 
-### 2\. The Agent Client (`agent.py`)
+### 3. The Agent Client (`agent.py`)
 
-The Agent doesn't import `add_numbers` directly. Instead, it defines **how to connect** to the server process.
+The Agent connects to multiple tools by defining multiple connection parameters.
 
 ```python
-# Define how to run the server script
-server_params = StdioServerParameters(
-    command="python",
-    args=["src/mcp_agent/servers/simple_mcp.py"],
-    env={}
-)
+# 1. Define Servers
+server_params_math = StdioServerParameters(command="python", args=[".../simple_mcp.py"])
+server_params_fs = StdioServerParameters(command="python", args=[".../filesystem_server.py"])
 
-# Initialize the Toolset
-mcp_toolset = McpToolset(connection_params=StdioConnectionParams(server_params))
+# 2. Initialize Toolsets
+math_toolset = McpToolset(connection_params=StdioConnectionParams(server_params_math))
+fs_toolset = McpToolset(connection_params=StdioConnectionParams(server_params_fs))
 
-# The Agent automatically sees tools exposed by the server
+# 3. Agent consumes both
 agent = LlmAgent(
     name="McpConsumer",
-    tools=[mcp_toolset], # <--- Dynamic Tool Loading
+    tools=[math_toolset, fs_toolset], # <--- Multi-source tools
     # ...
 )
+
 ```
 
 ## 🏆 Key Takeaways
 
-- **Decoupling:** You can change the server code (or even rewrite it in TypeScript) without changing a single line of the Agent's code.
-- **Security:** The Agent runs in its own process; the Tools run in another.
-- **Scalability:** You can connect multiple MCP servers (Filesystem, Database, Math) to a single Agent seamlessly.
+* **Decoupling:** You can change the server code (or even rewrite it in TypeScript) without changing a single line of the Agent's code.
+* **Security:** The Agent runs in its own process; the Tools run in another.
+* **Scalability:** We demonstrated connecting **multiple MCP servers** (Math + Filesystem) to a single Agent seamlessly.
+
+```

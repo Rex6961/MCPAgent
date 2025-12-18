@@ -28,10 +28,15 @@ async def main() -> None:
     server_params = StdioServerParameters(
         command="python", args=["src/mcp_agent/servers/simple_mcp.py"], env={}
     )
+    server_params_2 = StdioServerParameters(
+        command="python", args=["src/mcp_agent/servers/filesystem_server.py"], env={}
+    )
 
     connection_params = StdioConnectionParams(server_params=server_params)
+    connection_params_2 = StdioConnectionParams(server_params=server_params_2)
 
     mcp_toolset = McpToolset(connection_params=connection_params)
+    mcp_toolset_2 = McpToolset(connection_params=connection_params_2)
 
     root_agent = LlmAgent(
         name="McpConsumer",
@@ -41,9 +46,10 @@ async def main() -> None:
             "ATTENTION: Use the available tools to answer user questions. "
             "Always calculate numbers use 'add_numbers', "
             "and always give the current time use 'get_current_time', "
+            "and always give the current directories files use 'list_files'"
             "and then must to echo the result always use 'get_echo'."
         ),
-        tools=[mcp_toolset],
+        tools=[mcp_toolset, mcp_toolset_2],
     )
     session_service = InMemorySessionService()
     runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=session_service)
@@ -55,7 +61,7 @@ async def main() -> None:
         app_name=APP_NAME, user_id=user_id, session_id=session_id
     )
 
-    query = "Calculate 100 + 55 using the tools, and give the current time, and then echo the result."
+    query = "Calculate 100 + 55 using the tools, and give the current time, and give files to the path '../', and then echo the result."
     print(f"USER: {query}")
 
     message = Content(parts=[Part(text=query)])
@@ -77,8 +83,17 @@ async def main() -> None:
         print()
     finally:
         print("\n[SYSTEM: Closing MCP connection...]")
-        if hasattr(mcp_toolset, "close"):
-            await mcp_toolset.close()
+
+        async def safe_close(toolset):
+            if hasattr(toolset, "close"):
+                try:
+                    await toolset.close()
+                except (asyncio.CancelledError, RuntimeError):
+                    pass
+                except Exception as e:
+                    pass
+        await safe_close(mcp_toolset)
+        await safe_close(mcp_toolset_2)
 
 
 if __name__ == "__main__":
